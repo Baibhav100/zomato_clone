@@ -1,0 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+:root {
+  --zomato-red: #EF4F5F;
+  --zomato-dark: #1C1C1C;
+  --rating-green: #24963F;
+  --primary-font: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+body {
+  font-family: var(--primary-font);
+  color: var(--zomato-dark);
+  background: #FFFFFF;
+  -webkit-font-smoothing: antialiased;
+}
+
+.container {
+  max-width: 85%;
+  margin: 0 auto;
+}
+
+/* Base custom classes to complement Tailwind */
+.hover-lift {
+  @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl;
+}
+
+.glass-header {
+  @apply bg-white/80 backdrop-blur-md sticky top-0 z-[1000] border-b border-gray-100;
+}
+
+.btn-primary {
+  @apply bg-zomato-red text-white py-3 px-6 rounded-xl font-bold transition-all hover:bg-zomato-dark active:scale-95;
+}
+
+.input-field {
+  @apply w-full px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl outline-none focus:ring-2 focus:ring-zomato-red focus:bg-white transition-all;
+}
+
+.grid-3 {
+  @apply grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8;
+}
+
+/* Animations from the UI */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out;
+}
