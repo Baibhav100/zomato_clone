@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import api from '../api';
-import { Calendar, Package, ShoppingBag, MapPin, Receipt, Clock, ChevronRight, Utensils } from 'lucide-react';
+import { Calendar, Package, ShoppingBag, MapPin, Receipt, Clock, ChevronRight, Utensils, Trash2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 const statusConfig = {
     'pending':   { color: 'bg-yellow-100 text-yellow-800 border-yellow-200',   dot: 'bg-yellow-500',  label: 'PENDING' },
     'preparing': { color: 'bg-blue-100   text-blue-800   border-blue-200',     dot: 'bg-blue-500',    label: 'PREPARING' },
+    'out_for_delivery': { color: 'bg-purple-100 text-purple-800 border-purple-200', dot: 'bg-purple-500', label: 'OUT FOR DELIVERY' },
     'delivered': { color: 'bg-green-100  text-green-800  border-green-200',    dot: 'bg-green-500',   label: 'DELIVERED' },
     'cancelled': { color: 'bg-red-100    text-red-800    border-red-200',      dot: 'bg-red-500',     label: 'CANCELLED' },
 };
@@ -23,6 +24,16 @@ const Orders = () => {
             setOrders(res.data);
         } catch (err) { console.error('Orders fail:', err); }
         setLoading(false);
+    };
+
+    const handleDeleteOrder = async (orderId) => {
+        if (!window.confirm("Are you sure you want to remove this order from your history?")) return;
+        try {
+            await api.delete(`/api/orders/${orderId}`);
+            setOrders(prev => prev.filter(o => o.id !== orderId));
+        } catch (err) {
+            alert("Failed to delete order. It might be already processed.");
+        }
     };
 
     if (loading) return (
@@ -168,12 +179,21 @@ const Orders = () => {
                                             ₹{Number(order.total_price || 0).toLocaleString('en-IN')}
                                         </p>
                                     </div>
-                                    <Link
-                                        to={`/orders/${order.id}`}
-                                        className="flex items-center gap-2 bg-red-500 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-red-600 transition-all shadow-sm"
-                                    >
-                                        Order Details <ChevronRight size={16} />
-                                    </Link>
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => handleDeleteOrder(order.id)}
+                                            className="p-2.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all border border-transparent hover:border-red-100"
+                                            title="Delete order history"
+                                        >
+                                            <Trash2 size={18} />
+                                        </button>
+                                        <Link
+                                            to={`/orders/${order.id}`}
+                                            className="flex items-center gap-2 bg-red-500 text-white px-5 py-2.5 rounded-xl font-bold text-sm hover:bg-red-600 transition-all shadow-sm"
+                                        >
+                                            Order Details <ChevronRight size={16} />
+                                        </Link>
+                                    </div>
                                 </div>
                             </div>
                         );

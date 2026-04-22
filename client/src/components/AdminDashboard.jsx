@@ -613,11 +613,25 @@ const AdminDashboard = () => {
                                                 ₹{Number(o.total_price || 0).toLocaleString('en-IN')}
                                             </td>
                                             <td style={tdStyle}>
-                                                <span style={{ padding: '0.25rem 0.6rem', borderRadius: '2rem', fontSize: '0.75rem', fontWeight: 700,
-                                                    background: o.status === 'pending' ? '#fef3c7' : (o.status === 'delivered' ? '#d1fae5' : '#e0e7ff'),
-                                                    color: o.status === 'pending' ? '#d97706' : (o.status === 'delivered' ? '#059669' : '#4f46e5') }}>
-                                                    {(o.status || 'pending').toUpperCase()}
-                                                </span>
+                                                <select
+                                                    value={o.status || 'pending'}
+                                                    onChange={async (e) => {
+                                                        try {
+                                                            await api.put(`/api/admin/orders/${o.id}/status`, { status: e.target.value });
+                                                            fetchOrders();
+                                                        } catch (err) { alert('Update failed: ' + (err.response?.data?.error || err.message)); }
+                                                    }}
+                                                    style={{ padding: '0.3rem 0.5rem', borderRadius: '0.5rem', fontSize: '0.8rem', fontWeight: 700, border: '1px solid #E5E7EB', cursor: 'pointer', outline: 'none',
+                                                        background: o.status === 'pending' ? '#fef3c7' : (o.status === 'delivered' ? '#d1fae5' : '#e0e7ff'),
+                                                        color: o.status === 'pending' ? '#d97706' : (o.status === 'delivered' ? '#059669' : '#4f46e5') }}
+                                                >
+                                                    <option value="pending">Pending</option>
+                                                    <option value="preparing">Preparing</option>
+                                                    <option value="out_for_delivery">Out for Delivery</option>
+                                                    <option value="delivered">Delivered</option>
+                                                    <option value="cancelled">Cancelled</option>
+                                                </select>
+                                                {o.payment_method && <div style={{ fontSize: '0.7rem', color: '#6B7280', marginTop: '0.4rem', fontWeight: 700 }}>💳 {o.payment_method.toUpperCase()}</div>}
                                             </td>
                                             <td style={tdStyle}>
                                                 <button

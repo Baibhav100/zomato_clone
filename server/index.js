@@ -19,6 +19,8 @@ app.use(cors({
 }));
 
 
+// Database Schema updates
+db.execute("ALTER TABLE orders ADD COLUMN payment_method VARCHAR(50) DEFAULT 'cod'").catch(() => {});
 
 // --- AUTHENTICATION ---
 app.post('/api/auth/register', async (req, res) => {
@@ -226,12 +228,15 @@ app.post('/api/ai/describe-food', async (req, res) => {
 // --- ADMIN ---
 const authenticateAdmin = async (req, res, next) => {
     const token = req.cookies.accessToken || req.headers.authorization?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: "Auth required" });
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        if (decoded.role !== 'admin') throw new Error();
+        if (decoded.role !== 'admin') return res.status(403).json({ error: "Admin only" });
         req.user = decoded;
         next();
-    } catch { res.status(403).json({ error: "Admin only" }); }
+    } catch (err) { 
+        return res.status(401).json({ error: "Token expired or invalid" }); 
+    }
 };
 
 app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
@@ -277,7 +282,46 @@ app.get('/api/orders', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+app.delete('/api/orders/:id', async (req, res) => {
+    try {
+        const token = req.cookies.accessToken || req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: "Auth required" });
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+        // Verify order belongs to user
+        const [orderRows] = await db.execute('SELECT user_id FROM orders WHERE id = ?', [req.params.id]);
+        if (orderRows.length === 0) return res.status(404).json({ error: "Order not found" });
+        if (orderRows[0].user_id !== decoded.id) return res.status(403).json({ error: "Not authorized to delete this order" });
+
+        await db.execute('DELETE FROM order_items WHERE order_id = ?', [req.params.id]);
+        await db.execute('DELETE FROM orders WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) { 
+        const status = err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError' ? 401 : 500;
+        res.status(status).json({ error: err.message }); 
+    }
+});
+
+
+
+app.post('/api/payments/razorpay/order', async (req, res) => {
+    try {
+        const { amount } = req.body;
+        const axios = require('axios');
+        const auth = Buffer.from(`${process.env.RAZORPAY_KEY_ID}:${process.env.RAZORPAY_KEY_SECRET}`).toString('base64');
+        
+        const response = await axios.post('https://api.razorpay.com/v1/orders', {
+            amount: amount * 100, // paise
+            currency: "INR",
+            receipt: `receipt_${Date.now()}`
+        }, {
+            headers: { Authorization: `Basic ${auth}` }
+        });
+        res.json(response.data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
 app.post('/api/orders', async (req, res) => {
     const { restaurantId, totalPrice, address, items } = req.body;
@@ -290,14 +334,14 @@ app.post('/api/orders', async (req, res) => {
         let orderResult;
         try {
             [orderResult] = await db.execute(
-                'INSERT INTO orders (user_id, restaurant_id, total_price, address, status) VALUES (?, ?, ?, ?, ?)',
-                [decoded.id, restaurantId, totalPrice, address, 'delivered']
+                'INSERT INTO orders (user_id, restaurant_id, total_price, address, status, payment_method) VALUES (?, ?, ?, ?, ?, ?)',
+                [decoded.id, restaurantId, totalPrice, address, 'pending', req.body.paymentMethod || 'cod']
             );
         } catch (e) {
             // If total_price column doesn't exist, try total_amount
             [orderResult] = await db.execute(
-                'INSERT INTO orders (user_id, restaurant_id, total_amount, address, status) VALUES (?, ?, ?, ?, ?)',
-                [decoded.id, restaurantId, totalPrice, address, 'delivered']
+                'INSERT INTO orders (user_id, restaurant_id, total_amount, address, status, payment_method) VALUES (?, ?, ?, ?, ?, ?)',
+                [decoded.id, restaurantId, totalPrice, address, 'pending', req.body.paymentMethod || 'cod']
             );
         }
 
@@ -329,6 +373,38 @@ app.post('/api/orders', async (req, res) => {
 
 
 // --- USER PROFILE ---
+// --- ADMIN ORDERS ---
+app.get('/api/admin/orders', authenticateAdmin, async (req, res) => {
+    try {
+        const [rows] = await db.execute(`
+            SELECT o.id, o.status, o.address, o.created_at, o.payment_method,
+                   COALESCE(o.total_price, o.total_amount, 0) as total_price,
+                   u.name as user_name, u.email as user_email,
+                   r.name as restaurant_name
+            FROM orders o 
+            JOIN users u ON o.user_id = u.id
+            JOIN restaurants r ON o.restaurant_id = r.id 
+            ORDER BY o.created_at DESC
+        `);
+        // Fetch items for each order
+        for (let order of rows) {
+            try {
+                const [items] = await db.execute('SELECT quantity, price, item_name FROM order_items WHERE order_id = ?', [order.id]);
+                order.items = items;
+            } catch(e) { order.items = []; }
+        }
+        res.json(rows);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/admin/orders/:id/status', authenticateAdmin, async (req, res) => {
+    try {
+        const { status } = req.body;
+        await db.execute('UPDATE orders SET status = ? WHERE id = ?', [status, req.params.id]);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/auth/profile', async (req, res) => {
     const { name, phone, address } = req.body;
     const token = req.cookies.accessToken || req.headers.authorization?.split(' ')[1];
