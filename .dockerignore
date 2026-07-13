@@ -1,0 +1,10 @@
+# Avoid sending huge local directories to the Docker build context
+.git
+client/node_modules
+server/node_modules
+client/dist
+server/data/zomato.csv
+.env
+.dockerignore
+Dockerfile.*
+README.md

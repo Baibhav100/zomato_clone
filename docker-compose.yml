@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # MySQL Database
+  mysql:
+    image: mysql:8.0
+    container_name: zomato_mysql
+    environment:
+      MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+      MYSQL_DATABASE: zomato_clone
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./server/setup_db.sql:/docker-entrypoint-initdb.d/setup_db.sql
+    networks:
+      - zomato_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Backend Server
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: zomato_backend
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=root
+      - DB_PASSWORD=
+      - DB_NAME=zomato_clone
+      - DB_PORT=3306
+      - PORT=5000
+      - JWT_SECRET=ce40fa902619edfadd3d57098a7893544c6ff69609c226772a6e286f42b085eb484ca524021abaa812b6ac8b00f1f8ad89a940ace90226dd3dd07da29bc3887e
+      - JWT_REFRESH_SECRET=9ae02ce95627dfd82a9a6742589c9b0d82309cce21d08e73816f0a718f2dfb42b00c6cd2624fc5b713df1777fad351acbec75276e74a33dde973b02e63a800b0
+      - GEMINI_API_KEY=AIzaSyDdp4Orax9s6icpy5erKDYGRdMurHp1BXk
+      - RAZORPAY_KEY_ID=rzp_test_SggF9wcBE4nMhW
+      - RAZORPAY_KEY_SECRET=8GxuixPstvwXoFiqGauy85oe
+    ports:
+      - "5000:5000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - zomato_network
+    volumes:
+      - ./server:/app/server
+      - /app/server/node_modules
+    restart: unless-stopped
+
+  # Frontend Server
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        - VITE_API_URL=http://localhost:5000
+    container_name: zomato_frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - zomato_network
+    restart: unless-stopped
+
+volumes:
+  mysql_data:
+
+networks:
+  zomato_network:
+    driver: bridge

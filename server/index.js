@@ -164,10 +164,24 @@ app.get('/api/ai/user-classification', async (req, res) => {
         // Use Python for Classification
         const python = spawn('python', ['recommender.py', 'classify', ...categories]);
         let dataString = '';
+        let responded = false;
+        
         python.stdout.on('data', (data) => { dataString += data.toString(); });
+        
+        python.on('error', (err) => {
+            console.error('Python spawn error (classification):', err.message);
+            if (!responded) {
+                responded = true;
+                res.json({ classification: "Food Enthusiast", description: "You love exploring cuisines!" });
+            }
+        });
+        
         python.on('close', () => {
-            try { res.json(JSON.parse(dataString)); }
-            catch (e) { res.json({ classification: "Food Enthusiast", description: "You love exploring cuisines!" }); }
+            if (!responded) {
+                responded = true;
+                try { res.json(JSON.parse(dataString)); }
+                catch (e) { res.json({ classification: "Food Enthusiast", description: "You love exploring cuisines!" }); }
+            }
         });
     } catch (err) { res.json({ classification: "Food Enthusiast", description: "You love exploring various cuisines!" }); }
 });
@@ -188,21 +202,35 @@ app.get('/api/ai/recommend-similar/:id', async (req, res) => {
         // Call Python Recommender (Mode: recommend)
         const python = spawn('python', ['recommender.py', 'recommend', restaurant.name]);
         let dataString = '';
+        let responded = false;
+        
         python.stdout.on('data', (data) => { dataString += data.toString(); });
         
+        python.on('error', async (err) => {
+            console.error('Python spawn error (recommend):', err.message);
+            if (!responded) {
+                responded = true;
+                const [fallback] = await db.execute('SELECT * FROM restaurants WHERE category = ? AND id != ? LIMIT 3', [restaurant.category, req.params.id]);
+                res.json(fallback);
+            }
+        });
+        
         python.on('close', async (code) => {
-            try {
-                const similarNames = JSON.parse(dataString);
-                if (similarNames && similarNames.length > 0) {
-                    const [rows] = await db.execute(
-                        `SELECT * FROM restaurants WHERE name IN (${similarNames.map(() => '?').join(',')}) LIMIT 3`, 
-                        similarNames
-                    );
-                    return res.json(rows);
-                }
-            } catch (e) {}
-            const [fallback] = await db.execute('SELECT * FROM restaurants WHERE category = ? AND id != ? LIMIT 3', [restaurant.category, req.params.id]);
-            res.json(fallback);
+            if (!responded) {
+                responded = true;
+                try {
+                    const similarNames = JSON.parse(dataString);
+                    if (similarNames && similarNames.length > 0) {
+                        const [rows] = await db.execute(
+                            `SELECT * FROM restaurants WHERE name IN (${similarNames.map(() => '?').join(',')}) LIMIT 3`, 
+                            similarNames
+                        );
+                        return res.json(rows);
+                    }
+                } catch (e) {}
+                const [fallback] = await db.execute('SELECT * FROM restaurants WHERE category = ? AND id != ? LIMIT 3', [restaurant.category, req.params.id]);
+                res.json(fallback);
+            }
         });
     } catch (err) { res.json([]); }
 });
@@ -215,10 +243,24 @@ app.post('/api/ai/describe-food', async (req, res) => {
         // Use Python for Description mapping (Mode: describe)
         const python = spawn('python', ['recommender.py', 'describe', foodName, restaurantName || 'this restaurant']);
         let dataString = '';
+        let responded = false;
+        
         python.stdout.on('data', (data) => { dataString += data.toString(); });
+        
+        python.on('error', (err) => {
+            console.error('Python spawn error (describe):', err.message);
+            if (!responded) {
+                responded = true;
+                res.json({ result: "An exquisite blend of authentic flavors prepared to perfection." });
+            }
+        });
+        
         python.on('close', () => {
-            try { res.json(JSON.parse(dataString)); }
-            catch (e) { res.json({ result: "An exquisite blend of authentic flavors prepared to perfection." }); }
+            if (!responded) {
+                responded = true;
+                try { res.json(JSON.parse(dataString)); }
+                catch (e) { res.json({ result: "An exquisite blend of authentic flavors prepared to perfection." }); }
+            }
         });
     } catch (err) { res.json({ result: "An exquisite blend of authentic flavors prepared to perfection." }); }
 });
@@ -255,7 +297,7 @@ app.get('/api/orders', async (req, res) => {
         
         const [rows] = await db.execute(`
             SELECT o.id, o.status, o.address, o.created_at,
-                   COALESCE(o.total_price, o.total_amount, 0) as total_price,
+                   o.total_amount as total_price,
                    r.name as restaurant_name,
                    r.image_url as restaurant_image
             FROM orders o 
@@ -269,7 +311,7 @@ app.get('/api/orders', async (req, res) => {
             try {
                 const [items] = await db.execute(`
                     SELECT oi.quantity, oi.price,
-                           COALESCE(m.item_name, 'Item') as item_name
+                           COALESCE(oi.item_name, m.item_name, 'Item') as item_name
                     FROM order_items oi
                     LEFT JOIN menu_items m ON oi.menu_item_id = m.id
                     WHERE oi.order_id = ?
@@ -330,37 +372,20 @@ app.post('/api/orders', async (req, res) => {
         if (!token) return res.status(401).json({ error: "Login required" });
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-        // Try inserting with total_price first, fall back to total_amount
-        let orderResult;
-        try {
-            [orderResult] = await db.execute(
-                'INSERT INTO orders (user_id, restaurant_id, total_price, address, status, payment_method) VALUES (?, ?, ?, ?, ?, ?)',
-                [decoded.id, restaurantId, totalPrice, address, 'pending', req.body.paymentMethod || 'cod']
-            );
-        } catch (e) {
-            // If total_price column doesn't exist, try total_amount
-            [orderResult] = await db.execute(
-                'INSERT INTO orders (user_id, restaurant_id, total_amount, address, status, payment_method) VALUES (?, ?, ?, ?, ?, ?)',
-                [decoded.id, restaurantId, totalPrice, address, 'pending', req.body.paymentMethod || 'cod']
-            );
-        }
+        // Insert order using total_amount (the actual DB column name)
+        const [orderResult] = await db.execute(
+            'INSERT INTO orders (user_id, restaurant_id, total_amount, address, status, payment_method) VALUES (?, ?, ?, ?, ?, ?)',
+            [decoded.id, restaurantId, totalPrice, address, 'pending', req.body.paymentMethod || 'cod']
+        );
 
         const orderId = orderResult.insertId;
 
-        // Save each cart item — store item_name directly so it survives re-seeds
+        // Save each cart item with item_name for display in order history
         for (const it of items) {
-            try {
-                await db.execute(
-                    'INSERT INTO order_items (order_id, menu_item_id, quantity, price, item_name) VALUES (?, ?, ?, ?, ?)',
-                    [orderId, it.id || null, it.quantity, it.price, it.item_name || 'Item']
-                );
-            } catch (e) {
-                // item_name column might not exist yet — fall back without it
-                await db.execute(
-                    'INSERT INTO order_items (order_id, menu_item_id, quantity, price) VALUES (?, ?, ?, ?)',
-                    [orderId, it.id || null, it.quantity, it.price]
-                );
-            }
+            await db.execute(
+                'INSERT INTO order_items (order_id, menu_item_id, quantity, price, item_name) VALUES (?, ?, ?, ?, ?)',
+                [orderId, it.id || null, it.quantity, it.price, it.item_name || 'Item']
+            );
         }
 
         console.log(`[ORDER] New order #${orderId} placed by user ${decoded.id} for ₹${totalPrice}`);
@@ -378,7 +403,7 @@ app.get('/api/admin/orders', authenticateAdmin, async (req, res) => {
     try {
         const [rows] = await db.execute(`
             SELECT o.id, o.status, o.address, o.created_at, o.payment_method,
-                   COALESCE(o.total_price, o.total_amount, 0) as total_price,
+                   o.total_amount as total_price,
                    u.name as user_name, u.email as user_email,
                    r.name as restaurant_name
             FROM orders o 
@@ -435,7 +460,7 @@ app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
         const [[{ count: restaurantCount }]] = await db.execute('SELECT COUNT(*) as count FROM restaurants');
         const [[{ count: foodCount }]] = await db.execute('SELECT COUNT(*) as count FROM menu_items');
         const [[{ count: totalUsers }]] = await db.execute('SELECT COUNT(*) as count FROM users');
-        const [[{ total: totalRevenue }]] = await db.execute('SELECT SUM(total_price) as total FROM orders');
+        const [[{ total: totalRevenue }]] = await db.execute('SELECT SUM(total_amount) as total FROM orders');
         const [[{ count: totalOrders }]] = await db.execute('SELECT COUNT(*) as count FROM orders');
         
         res.json({ restaurantCount, foodCount, totalUsers, totalRevenue: totalRevenue || 0, totalOrders });
@@ -445,7 +470,7 @@ app.get('/api/admin/stats', authenticateAdmin, async (req, res) => {
 app.get('/api/admin/daily-sales', authenticateAdmin, async (req, res) => {
     try {
         const [rows] = await db.execute(`
-            SELECT DATE(created_at) as date, COUNT(*) as order_count, SUM(total_price) as total_revenue 
+            SELECT DATE(created_at) as date, COUNT(*) as order_count, SUM(total_amount) as total_revenue 
             FROM orders 
             GROUP BY DATE(created_at) 
             ORDER BY date DESC LIMIT 14

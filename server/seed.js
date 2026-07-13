@@ -63,7 +63,7 @@ async function runSeed() {
         for await (const line of rl) {
             if (!header) { header = parseCsvLine(line); continue; }
             const data = parseCsvLine(line);
-            if (data.length < 10 || !data[2]) continue;
+            if (data.length < 10 || !data[2] || !data[0] || !data[0].startsWith('https://')) continue;
 
             // Clean restaurant name — strip any noise
             const name = data[2].replace(/["']/g, '').trim();
@@ -75,7 +75,8 @@ async function runSeed() {
             
             // Price for two — only numeric
             const priceRaw = data[12] ? data[12].replace(/[^\d]/g, '') : '';
-            const price = (priceRaw && parseInt(priceRaw) > 0) ? parseInt(priceRaw) : Math.floor(Math.random() * 600) + 300;
+            let price = (priceRaw && parseInt(priceRaw) > 0) ? parseInt(priceRaw) : Math.floor(Math.random() * 600) + 300;
+            if (price > 10000) price = Math.floor(Math.random() * 600) + 300;
             
             const category = ['delivery', 'dine_out', 'nightlife'][Math.floor(Math.random() * 3)];
             const cuisines = (data[11] || 'Multi-cuisine').substring(0, 200);
